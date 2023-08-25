@@ -44,6 +44,7 @@ public class AutomataMod
         EntityRegisterer.ENTITIES.register(bus);
 
         /*
+
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
 
