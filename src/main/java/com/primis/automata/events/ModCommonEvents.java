@@ -1,13 +1,13 @@
 package com.primis.automata.events;
 
-import com.primis.automata.AutomataMod;
+import com.primis.automata.constants.Names;
 import com.primis.automata.entities.LumberjackAutomata;
 import com.primis.automata.register.EntityRegisterer;
 import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-@Mod.EventBusSubscriber(modid = AutomataMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD)
+@Mod.EventBusSubscriber(modid = Names.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD)
 public class ModCommonEvents {
 
     @SubscribeEvent
