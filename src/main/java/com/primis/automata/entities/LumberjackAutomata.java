@@ -1,7 +1,7 @@
 package com.primis.automata.entities;
 
 import com.mojang.logging.LogUtils;
-import com.primis.automata.entities.goals.FindNearWoodsAndLeavesGoal;
+import com.primis.automata.entities.goals.FindNearTreesGoal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
@@ -24,7 +24,7 @@ public class LumberjackAutomata extends PathfinderMob {
 
     public LumberjackAutomata(EntityType<? extends PathfinderMob> entityType, Level level) {
         super(entityType, level);
-        this.moveControl = new FlyingMoveControl(this, 20, true);
+        this.moveControl = new FlyingMoveControl(this, 10, true);
         this.getNavigation().setMaxVisitedNodesMultiplier(10.0F);
     }
 
@@ -49,8 +49,7 @@ public class LumberjackAutomata extends PathfinderMob {
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new PanicGoal(this, 0.8D));
-        //this.goalSelector.addGoal(3, new FollowMobGoal(this, 0.6D, 2.0F, 32.0F));
-        this.goalSelector.addGoal(4, new FindNearWoodsAndLeavesGoal(this));
+        this.goalSelector.addGoal(4, new FindNearTreesGoal(this));
         // depositResourcesInBase
         // chopTree
         // findNearTree
