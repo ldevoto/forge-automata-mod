@@ -2,18 +2,24 @@ package com.primis.automata.entities.goals;
 
 import com.mojang.logging.LogUtils;
 import com.primis.automata.entities.LumberjackAutomata;
+import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.Material;
 import net.minecraft.world.phys.Vec3;
@@ -35,6 +41,7 @@ public class FindNearTreesGoal extends Goal {
     private final AutomataStatus.FindingTreesStatus findingFarTreesStatus;
     private final AutomataStatus.ChoppingTreeStatus choppingTreeStatus;
     private final AutomataStatus.MovingToBlockPos movingToBlockPosStatus;
+    private BlockPos fixedPosition;
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -45,7 +52,7 @@ public class FindNearTreesGoal extends Goal {
         this.idleStatus = new AutomataStatus.IdleStatus(this);
         this.findingNearTreesStatus = new AutomataStatus.FindingNearTreesStatus(this, 2);
         this.findingFarTreesStatus = new AutomataStatus.FindingTreesStatus(this, 16);
-        this.choppingTreeStatus = new AutomataStatus.ChoppingTreeStatus(this);
+        this.choppingTreeStatus = new AutomataStatus.ChoppingTreeStatus(this, 2);
         this.movingToBlockPosStatus = new AutomataStatus.MovingToBlockPos(this);
         this.status = idleStatus;
         this.lastStatus = idleStatus;
@@ -63,6 +70,9 @@ public class FindNearTreesGoal extends Goal {
 
     @Override
     public void start() {
+        if (fixedPosition == null) {
+            fixedPosition = mob.blockPosition();
+        }
         status.start();
     }
 
@@ -95,7 +105,7 @@ public class FindNearTreesGoal extends Goal {
     }
 
     private void findFarTrees() {
-        findingFarTreesStatus.setCenter(mob.blockPosition());
+        findingFarTreesStatus.setCenter(fixedPosition);
         changeStatus(findingFarTreesStatus);
     }
 
@@ -118,19 +128,10 @@ public class FindNearTreesGoal extends Goal {
 
     protected static boolean isValidTarget(LevelReader level, BlockPos pos) {
         BlockState blockState = level.getBlockState(pos);
-        if (blockState.isAir()) {
+        if (blockState.isAir() || blockState.is(BlockTags.DIRT)) {
             return false;
         }
-        if (blockState.is(BlockTags.DIRT)) {
-            return false;
-        }
-        if (isALog(blockState)) {
-            return true;
-        }
-        if (isALeave(blockState)) {
-            return true;
-        }
-        return false;
+        return isALog(blockState) || isALeave(blockState);
     }
 
     private static boolean isALeave(BlockState blockState) {
@@ -182,11 +183,6 @@ public class FindNearTreesGoal extends Goal {
             }
 
             @Override
-            boolean canContinueToUse() {
-                return true;
-            }
-
-            @Override
             void tick() {
                 goal.findFarTrees();
             }
@@ -195,8 +191,6 @@ public class FindNearTreesGoal extends Goal {
         private static class MovingToBlockPos extends AutomataStatus {
             private BlockPos blockPos;
             private AutomataStatus onReachStatus;
-            private int ticksInPlace;
-            private static final int MIN_TICKS_IN_PLACE = 20;
             private static final double MAX_IN_PLACE_DISTANCE = 0.8D;
 
             public MovingToBlockPos(FindNearTreesGoal goal) {
@@ -234,7 +228,6 @@ public class FindNearTreesGoal extends Goal {
             }
 
             private void moveToTarget() {
-                ticksInPlace = 0;
                 if (this.blockPos == null) {
                     goal.idle();
                     return;
@@ -269,12 +262,11 @@ public class FindNearTreesGoal extends Goal {
         private static class FindingTreesStatus extends AutomataStatus {
             private Queue<HeightBlockPos> heightBlockPosQueue = new PriorityQueue<>();
             private final int maxDist;
-            private BlockPos center;
+            protected BlockPos center;
 
             public FindingTreesStatus(FindNearTreesGoal goal, int maxDist) {
                 super(goal);
                 this.maxDist = maxDist;
-                this.center = mob.blockPosition();
             }
 
             @Override
@@ -346,30 +338,32 @@ public class FindNearTreesGoal extends Goal {
             @Override
             protected void moveAndChop(BlockPos blockPos) {
                 if (blockPos != null) {
-                    goal.moveToAndThenChop(blockPos);
+                    goal.moveToAndThenChop(new BlockPos(this.center.getX(), blockPos.getY(), this.center.getZ()));
                 }
             }
         }
 
         private static class ChoppingTreeStatus extends AutomataStatus {
-            private boolean isChopping;
+            private int choppingStep = 0;
             private BlockPos startPosition = null;
             private BlockPos currentChoppedPosition = null;
             private Queue<BlockPos> chopStack = new LinkedList<>();
-            private static final int MAX_CHOP_DISTANCE = 2;
+            private float harvestProgress = 0;
+            private final int maxChopDistance;
 
-            public ChoppingTreeStatus(FindNearTreesGoal goal) {
+            public ChoppingTreeStatus(FindNearTreesGoal goal, int maxChopDistance) {
                 super(goal);
+                this.maxChopDistance = maxChopDistance;
             }
 
             @Override
             public void tick() {
-                if (isChopping) {
+                if (isChopping()) {
                     nextChoppingStep();
                 } else if (!chopStack.isEmpty()) {
                     startChopping();
                 } else {
-                    fillChopStack(mob.level, startPosition, MAX_CHOP_DISTANCE);
+                    fillChopStack(mob.level, startPosition, maxChopDistance);
                     if (chopStack.isEmpty()) {
                         goal.findNearTrees();
                     }
@@ -378,22 +372,50 @@ public class FindNearTreesGoal extends Goal {
 
             @Override
             void onChange() {
+                harvestProgress = 0;
+                choppingStep = 0;
                 currentChoppedPosition = null;
                 chopStack = new LinkedList<>();
             }
 
-            private void nextChoppingStep() {
-                // TODO: Chop logic
-                BlockState blockstate = mob.level.getBlockState(currentChoppedPosition);
-                mob.level.removeBlock(currentChoppedPosition, false);
-                mob.level.gameEvent(GameEvent.BLOCK_DESTROY, currentChoppedPosition, GameEvent.Context.of(this.mob, blockstate));
-                //this.enderman.setCarriedBlock(blockstate.getBlock().defaultBlockState());
-                isChopping = false;
+            public boolean isChopping() {
+                return choppingStep > 0;
             }
 
             private void startChopping() {
-                isChopping = true;
+                choppingStep++;
                 currentChoppedPosition = chopStack.remove();
+                mob.lookAt(EntityAnchorArgument.Anchor.EYES, Vec3.atCenterOf(currentChoppedPosition));
+            }
+
+            private void nextChoppingStep() {
+                choppingStep++;
+                BlockState blockState = mob.level.getBlockState(currentChoppedPosition);
+                harvestProgress += getDestroyProgress(blockState, mob.level, currentChoppedPosition);
+                if (harvestProgress >= 1.0f) {
+                    finishChopping();
+                    return;
+                }
+                if (choppingStep % 5 == 0 ) {
+                    SoundType soundType = blockState.getSoundType();
+                    mob.level.playSound(null, currentChoppedPosition, soundType.getHitSound(), SoundSource.BLOCKS, soundType.getVolume() / 2.0f, soundType.getPitch() + mob.getRandom().nextFloat() * 0.2f);
+                }
+            }
+
+            private void finishChopping() {
+                mob.level.destroyBlock(currentChoppedPosition, true, mob);
+                harvestProgress = 0;
+                choppingStep = 0;
+                currentChoppedPosition = null;
+            }
+
+            public float getDestroyProgress(BlockState blockState, BlockGetter level, BlockPos currentPos) {
+                float f = blockState.getDestroySpeed(level, currentPos);
+                if (f == -1.0F) {
+                    return 0.0F;
+                } else {
+                    return mob.harvestSpeed / f / 30.0f;
+                }
             }
 
             private void fillChopStack(LevelReader level, BlockPos start, int maxDist) {
